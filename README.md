@@ -34,9 +34,9 @@ git clone https://github.com/Springer-Electronics/JLC2KiCad_lib.git
 ```
 Locate your Kicad python installation, e.g. `c:/Program Files/KiCad/8.0/bin/python.exe``
 
-Install KicadModTree dependency in a command prompts terminal using a command, e.g:
+Install KicadModTree dependency in a command prompt terminal (admin) using a command, e.g:
 ```
-"c:/Program Files/KiCad/8.0/bin/python.exe" -m pip install KicadModTree
+"c:/Program Files/KiCad/9.0/bin/python.exe" -m pip install KicadModTree
 ```
 
 
