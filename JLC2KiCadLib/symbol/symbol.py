@@ -4,7 +4,6 @@ import re
 import os
 import logging
 
-from KicadModTree import *
 from .symbol_handlers import *
 
 
@@ -34,8 +33,8 @@ def create_symbol(
 ):
     class kicad_symbol:
         drawing = ""
-        pinNamesHide = ""
-        pinNumbersHide = ""
+        pinNamesHide = "(pin_names hide)"
+        pinNumbersHide = "(pin_numbers hide)"
 
     kicad_symbol = kicad_symbol()
 
@@ -56,9 +55,14 @@ def create_symbol(
         ].replace("?", "")
         component_title = (
             data["result"]["title"]
-            .replace("/", "_")
             .replace(" ", "_")
             .replace(".", "_")
+            .replace("/", "{slash}")
+            .replace("\\", "{backslash}")
+            .replace("<", "{lt}")
+            .replace(">", "{gt}")
+            .replace(":", "{colon}")
+            .replace('"', "{dblquote}")
         )
 
         component_types_values = []
@@ -86,7 +90,7 @@ def create_symbol(
 
         filename = f"{output_dir}/{symbol_path}/{library_name}.kicad_sym"
 
-        logging.info(f"creating symbol {component_title} in {library_name}")
+        logging.info(f"Creating symbol {component_title} in {library_name}")
 
         kicad_symbol.drawing += f'''\n    (symbol "{component_title}_1"'''
 

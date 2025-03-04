@@ -1,9 +1,19 @@
 import json
 import logging
-from math import pow, acos, pi
+from math import pow, acos, pi, sqrt
 import re
 
-from KicadModTree import *
+from KicadModTree import (
+    Line,
+    Pad,
+    Polygon,
+    Vector2D,
+    Arc,
+    Circle,
+    RectFill,
+    Text,
+    RectLine,
+)
 from .model3d import get_WrlModel, get_StepModel
 
 __all__ = [
@@ -76,94 +86,122 @@ def h_TRACK(data, kicad_mod, footprint_info):
 
 
 def h_PAD(data, kicad_mod, footprint_info):
-    shape_correspondance = {
-        "OVAL": "SHAPE_OVAL",
-        "RECT": "SHAPE_RECT",
-        "ELLIPSE": "SHAPE_CIRCLE",
-        "POLYGON": "SHAPE_CUSTOM",
-    }
+    """
+    Append a pad to the footprint
 
-    data[1] = mil2mm(data[1])
-    data[2] = mil2mm(data[2])
-    data[3] = mil2mm(data[3])
-    data[4] = mil2mm(data[4])
-    data[7] = mil2mm(data[7])
+    data : [
+        0 : shape type
+        1 : pad position x
+        2 : pad position y
+        3 : pad size x
+        4 : pad size y
+        5 : layer
+        6 : pad number
+        7 : drill size
+        8 : Polygon nodes "skipped for some shapes"
+        9 : rotation
+        10 :
+        11 : drill offset
+        12 :
+        13 :
+        14 :
+        15 :
+        16 :
+        17 : ? position
+    ]
+    """
 
+    # PAD layer definition
+    TOPLAYER = "1"
+    BOTTOMLAYER = "2"
+    MULTILAYER = "11"
+
+    shape_type = data[0]
+    at = [mil2mm(data[1]), mil2mm(data[2])]
+    size = [mil2mm(data[3]), mil2mm(data[4])]
+    layer = data[5]
     pad_number = data[6]
-    at = [data[1], data[2]]
-    size = [data[3], data[4]]
-    drill_size = data[7] * 2
+    drill_diameter = float(mil2mm(data[7])) * 2
+    drill_size = drill_diameter
+
+    # Some shape do not have coordinates, insert empty data to realign later index
+    if shape_type in ["ELLIPSE"]:
+        data.insert(8, "")
+
+    rotation = float(data[9])
+    drill_offset = float(mil2mm(data[11]))
+
     primitives = ""
 
-    if data[0] in shape_correspondance:
-        shape = shape_correspondance[data[0]]
-    else:
-        logging.error(
-            "footprint handler, pad : no correspondance found, using default SHAPE_OVAL"
-        )
-        shape = "SHAPE_OVAL"
-
-    # if pad is Circle, no rotation is specified
-    if shape == "SHAPE_CIRCLE":
-        rotation = 0
-    else:
-        rotation = float(data[9])
-
-    if data[5] == "1":
-        drill_size = 1
+    if layer == MULTILAYER:
+        pad_type = Pad.TYPE_THT
+        pad_layer = Pad.LAYERS_THT
+    elif layer == TOPLAYER:
         pad_type = Pad.TYPE_SMT
         pad_layer = Pad.LAYERS_SMT
-        if shape == "SHAPE_CUSTOM":
-            points = []
-            for i, coord in enumerate(data[8].split(" ")):
-                points.append(mil2mm(coord) - at[i % 2])
-            primitives = [Polygon(nodes=zip(points[::2], points[1::2]))]
-            size = [0.1, 0.1]
-            rotation = 0
-
-    elif data[5] == "11" and shape == "SHAPE_OVAL":
-        pad_type = Pad.TYPE_THT
-        pad_layer = Pad.LAYERS_THT
-        data[11] = mil2mm(data[11])
-        if data[11] == 0:
-            drill_size = data[7] * 2
-        elif (data[7] * 2 < data[11]) ^ (
-            size[0] > size[1]
-        ):  # invert the orientation of the drill hole if not in the same orientation as the pad shape
-            drill_size = [data[7] * 2, data[11]]
-        else:
-            drill_size = [data[11], data[7] * 2]
-
-    elif data[5] == "11" and shape == "SHAPE_CIRCLE":
-        pad_type = Pad.TYPE_THT
-        pad_layer = Pad.LAYERS_THT
-
-    elif data[5] == "11" and shape == "SHAPE_RECT":
-        if float(data[11]) == 0:  # Check if the hole is oval
-            pass
-        else:
-            drill_size = [drill_size, mil2mm(data[11])]
-
-        pad_type = Pad.TYPE_THT
-        pad_layer = Pad.LAYERS_THT
-
+    elif layer == BOTTOMLAYER:
+        pad_type = Pad.TYPE_SMT
+        pad_layer = ["B.Cu", "B.Mask", "B.Paste"]
     else:
         logging.warning(
-            f"footprint handler, pad : unknown assembly_process skiping pad n° : {pad_number}"
+            f"footprint, h_PAD: Unrecognized pad layer. Using default SMT layer for pad {pad_number}"
         )
-        return ()
+        pad_type = Pad.TYPE_SMT
+        pad_layer = Pad.LAYERS_SMT
+
+    if data[0] == "OVAL":
+        shape = Pad.SHAPE_OVAL
+
+        if drill_offset == 0:
+            drill_size = drill_diameter
+        elif (drill_diameter < drill_offset) ^ (
+            size[0] > size[1]
+        ):  # invert the orientation of the drill hole if not in the same orientation as the pad shape
+            drill_size = [drill_diameter, drill_offset]
+        else:
+            drill_size = [drill_offset, drill_diameter]
+
+    elif data[0] == "RECT":
+        shape = Pad.SHAPE_RECT
+
+        if drill_offset == 0:
+            drill_size = drill_diameter
+        else:
+            drill_size = [drill_diameter, drill_offset]
+
+    elif data[0] == "ELLIPSE":
+        shape = Pad.SHAPE_CIRCLE
+
+    elif data[0] == "POLYGON":
+        shape = Pad.SHAPE_CUSTOM
+        points = []
+        for i, coord in enumerate(data[8].split(" ")):
+            points.append(mil2mm(coord) - at[i % 2])
+        primitives = [Polygon(nodes=zip(points[::2], points[1::2]))]
+        size = [0.1, 0.1]
+
+        if drill_offset == 0:  # Check if the hole is oval
+            drill_size = 1
+        else:
+            drill_size = [drill_diameter, drill_offset]
+
+    else:
+        logging.error(
+            f"footprint handler, pad : no correspondance found, using default SHAPE_OVAL for pad {pad_number}"
+        )
+        shape = Pad.SHAPE_OVAL
 
     # update footprint borders
-    footprint_info.max_X = max(footprint_info.max_X, data[1])
-    footprint_info.min_X = min(footprint_info.min_X, data[1])
-    footprint_info.max_Y = max(footprint_info.max_Y, data[2])
-    footprint_info.min_Y = min(footprint_info.min_Y, data[2])
+    footprint_info.max_X = max(footprint_info.max_X, at[0])
+    footprint_info.min_X = min(footprint_info.min_X, at[0])
+    footprint_info.max_Y = max(footprint_info.max_Y, at[1])
+    footprint_info.min_Y = min(footprint_info.min_Y, at[1])
 
     kicad_mod.append(
         Pad(
             number=pad_number,
             type=pad_type,
-            shape=getattr(Pad, shape),
+            shape=shape,
             at=at,
             size=size,
             rotation=rotation,
@@ -175,49 +213,50 @@ def h_PAD(data, kicad_mod, footprint_info):
 
 
 def h_ARC(data, kicad_mod, footprint_info):
-    # append an Arc to the footprint
+    """
+    append an Arc to the footprint
+    """
+    # pylint: disable=unused-argument
+
     try:
-        # parse the data
-        if data[2][0] == "M":
-            startX, startY, midX, midY, _, reversed, direction, endX, endY = [
-                val
-                for val in data[2]
-                .replace("M", "")
-                .replace("A", "")
-                .replace(",", " ")
-                .split(" ")
-                if val
-            ]
-        elif data[3][0] == "M":
-            startX, startY, midX, midY, _, reversed, direction, endX, endY = [
-                val
-                for val in data[3]
-                .replace("M", "")
-                .replace("A", "")
-                .replace(",", " ")
-                .split(" ")
-                if val
-            ]
+
+        # "S$xx" is sometimes inserted at index 2 ?
+        if "$" in data[2]:
+            svg_path = data[3]
         else:
-            logging.warning(
-                "footprint handler, h_ARC : failed to parse footprint ARC data"
-            )
+            svg_path = data[2]
+
+        # Regular expression to match ARC pattern
+        # coordinates can sometime be separated by a "," instead of a space, therefore we match it using [\s,*?]
+        pattern = r"M\s*([\d\.\-]+)[\s,*?]([\d\.\-]+)\s?A\s*([\d\.\-]+)[\s,*?]([\d\.\-]+) ([\d\.\-]+) (\d) (\d) ([\d\.\-]+)[\s,*?]([\d\.\-]+)"
+
+        match = re.search(pattern, svg_path)
+
+        if not match:
+            logging.error("footprint handler, h_ARC: Failed to parse ARC")
+            return
+
+        # Extract values
+        start_x, start_y = float(match.group(1)), float(match.group(2))
+        rx, ry = float(match.group(3)), float(match.group(4))
+        _ = float(match.group(5))  # rotation ?
+        large_arc_flag = int(match.group(6))
+        sweep_flag = int(match.group(7))
+        end_x, end_y = float(match.group(8)), float(match.group(9))
+
         width = data[0]
 
         width = mil2mm(width)
-        startX = mil2mm(startX)
-        startY = mil2mm(startY)
-        midX = mil2mm(midX)
-        midY = mil2mm(midY)
-        endX = mil2mm(endX)
-        endY = mil2mm(endY)
+        start_x = mil2mm(start_x)
+        start_y = mil2mm(start_y)
+        mid_x = mil2mm(rx)
+        mid_y = mil2mm(ry)
+        end_x = mil2mm(end_x)
+        end_y = mil2mm(end_y)
 
-        if midX != midY:
-            logging.warning("Unexpected arc, midX != midY")
-
-        start = [startX, startY]
-        end = [endX, endY]
-        if direction == "0":
+        start = [start_x, start_y]
+        end = [end_x, end_y]
+        if sweep_flag == 0:
             start, end = end, start
 
         # find the midpoint of start and end
@@ -226,12 +265,12 @@ def h_ARC(data, kicad_mod, footprint_info):
         vec1 = Vector2D(mid[0] - start[0], mid[1] - start[1])
 
         # create vector that's normal to vec1:
-        length_squared = pow(midX, 2) - pow(vec1.distance_to((0, 0)), 2)
+        length_squared = mid_x * mid_y - pow(vec1.distance_to((0, 0)), 2)
         if length_squared < 0:
             length_squared = 0
-            reversed = "1"
+            large_arc_flag = 1
 
-        if reversed == "1":
+        if large_arc_flag == 1:
             vec2 = vec1.rotate(-90)
         else:
             vec2 = vec1.rotate(90)
@@ -264,25 +303,19 @@ def h_ARC(data, kicad_mod, footprint_info):
         try:
             layer = layer_correspondance[data[1]]
         except KeyError:
-            logging.warning("footprint handler, h_ARC : layer correspondance not found")
+            logging.warning(
+                "footprint handler, h_ARC : layer correspondance not found. Adding arc on default F.Silks layer"
+            )
             layer = "F.SilkS"
-        if reversed == "1":
-            kicad_mod.append(
-                Arc(
-                    start=start,
-                    end=end,
-                    width=width,
-                    angle=360 - angle,
-                    center=cen,
-                    layer=layer,
-                )
-            )
-        else:
-            kicad_mod.append(
-                Arc(start=start, end=end, width=width, center=cen, layer=layer)
-            )
 
-    except Exception as e:
+        if large_arc_flag == 1:
+            angle = 360 - angle
+
+        kicad_mod.append(
+            Arc(start=start, end=end, width=width, center=cen, layer=layer)
+        )
+
+    except Exception:
         logging.exception("footprint handler, h_ARC: failed to add ARC")
 
 
@@ -351,15 +384,19 @@ def h_SVGNODE(data, kicad_mod, footprint_info):
         logging.exception("footprint handler, h_SVGNODE : failed to parse json data")
         return ()
 
+    c_origin = data["attrs"]["c_origin"].split(",")
     if "STEP" in footprint_info.models:
         get_StepModel(
             component_uuid=data["attrs"]["uuid"],
             footprint_info=footprint_info,
             kicad_mod=kicad_mod,
+            translationX=float(c_origin[0]),
+            translationY=float(c_origin[1]),
+            translationZ=data["attrs"]["z"],
+            rotation=data["attrs"]["c_rotation"],
         )
 
     if "WRL" in footprint_info.models:
-        c_origin = data["attrs"]["c_origin"].split(",")
         get_WrlModel(
             component_uuid=data["attrs"]["uuid"],
             footprint_info=footprint_info,
