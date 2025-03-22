@@ -84,6 +84,12 @@ def create_symbol(
         ):
             continue
 
+        component_description = (data["result"]["description"] 
+                                 if "description" in data["result"] else "")
+        component_value = (data["result"]["dataStr"]["head"]["c_para"]["Value"]
+                           if "Value" in data["result"]["dataStr"]["head"]["c_para"]
+                           else ComponentName)
+
         # if library_name is not defined, use component_title as library name
         if not library_name:
             library_name = ComponentName
@@ -118,7 +124,7 @@ def create_symbol(
     (property "Reference" "{symmbolic_prefix}" (id 0) (at 0 1.27 0)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "{ComponentName}" (id 1) (at 0 -2.54 0)
+    (property "Value" "{component_value}" (id 1) (at 0 -2.54 0)
       (effects (font (size 1.27 1.27)))
     )
     (property "Footprint" "{footprint_name}" (id 2) (at 0 -10.16 0)
@@ -133,7 +139,10 @@ def create_symbol(
     (property "LCSC" "{component_id}" (id 5) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    {get_type_values_properties(6, component_types_values)}{kicad_symbol.drawing}
+    (property "Description" "{component_description}" (id 6) (at 0 0 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    {get_type_values_properties(7, component_types_values)}{kicad_symbol.drawing}
   )
 """
 
@@ -193,7 +202,7 @@ def update_library(
     with open(
         f"{output_dir}/{symbol_path}/{library_name}.kicad_sym", "rb+"
     ) as lib_file:
-        pattern = f'  \(symbol "{component_title}" (\n|.)*?\n  \)'
+        pattern = f'  \\(symbol "{component_title}"[\\s\\S]*?\\n  \\)'
         file_content = lib_file.read().decode()
 
         if f'symbol "{component_title}"' in file_content:

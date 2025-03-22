@@ -33,6 +33,11 @@ class MyCustomDialog(wx.Dialog):
         self.text_entry = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
         sizer.Add(self.text_entry, 0, wx.ALL | wx.EXPAND, 10)
 
+        # Add a checkbox for updating existing footprints
+        self.update_existing_checkbox = wx.CheckBox(self, label="Update existing")
+        self.update_existing_checkbox.SetValue(True)  # Set to checked by default
+        sizer.Add(self.update_existing_checkbox, 0, wx.ALL, 10)
+
         # Add custom buttons
         box = wx.StdDialogButtonSizer()
         
@@ -60,12 +65,14 @@ class MyCustomDialog(wx.Dialog):
 
     def OnDownload(self, event):
         component_id = self.text_entry.GetValue()
+        skip_existing = not self.update_existing_checkbox.GetValue()
+
         if not component_id:
             wx.MessageBox("Type part number, e.g. C326215")
             return
         board: pcbnew.BOARD = pcbnew.GetBoard()
         board_dir = os.path.dirname(board.GetFileName())
-        self.libpath, self.component_name = download_part(component_id, os.path.join(board_dir, OUTPUT_FOLDER), True, True)
+        self.libpath, self.component_name = download_part(component_id, os.path.join(board_dir, OUTPUT_FOLDER), True, skip_existing)
         wx.MessageBox(f"Footprint " + self.component_name + " downloaded to project library " + self.libpath)
 
     def OnPlaceFootprint(self, event):
